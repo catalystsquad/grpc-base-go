@@ -1,0 +1,20 @@
+name: Release
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - Dockerfile
+      - 'go.mod'
+      - 'go.sum'
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    name: Release and update helm chart
+    steps:
+      - uses: swarm-io/action-release-update-chart@v1
+        with:
+          token: ${{ secrets.GIT_RUNNER_TOKEN }}
