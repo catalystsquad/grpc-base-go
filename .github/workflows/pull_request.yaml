@@ -4,8 +4,7 @@ on:
     branches:
       - main
     paths:
-      - 'src/**'
-      - 'test/**'
+      - 'pkg/**'
       - 'go.mod'
       - 'go.sum'
 jobs:
