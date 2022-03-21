@@ -6,10 +6,8 @@ on:
     paths:
       - 'src/**'
       - 'test/**'
-      - 'Dockerfile'
       - 'go.mod'
       - 'go.sum'
-      - 'skaffold.yaml'
 jobs:
   conventional-commits-pr:
     if: github.event.pull_request.draft == false
