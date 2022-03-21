@@ -14,13 +14,18 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"sync"
 )
 
+var shutDown = make(chan struct{})
+var runError = make(chan error)
+var wg = new(sync.WaitGroup)
+
 type GrpcServer struct {
-	Config      GrpcServerConfig
-	Server      *grpc.Server
-	BeforeStart func() error
-	Shutdown    func()
+	Config GrpcServerConfig
+	Server *grpc.Server
 }
 
 type GrpcServerConfig struct {
@@ -42,15 +47,54 @@ func NewGrpcServer(config GrpcServerConfig) *GrpcServer {
 	}
 }
 
-func (s *GrpcServer) Run() error {
+func (s *GrpcServer) Run() (err error) {
+	// listen for os signals
+	var osSignal = make(chan os.Signal, 1)
+	signal.Notify(osSignal, os.Interrupt)
+	wg.Add(1)
+	// run the server
+	go s.run()
+	// wait for either error or os signal to terminate
+	select {
+	case runErr := <-runError:
+		err = runErr
+		errorutils.LogOnErr(nil, "error running gRPC server", err)
+	case <-osSignal:
+		// nothing special on osSignal, just break the select
+	}
+	// close shutdown to stop the server
+	close(shutDown)
+	// wait for shutdown
+	wg.Wait()
+	return
+}
+
+func (s *GrpcServer) maybeInitSentry() {
+	if s.Config.SentryEnabled {
+		sentryutils.MaybeInitSentry(s.Config.SentryClientOptions, nil)
+	}
+}
+
+func (s *GrpcServer) servePrometheusMetrics() {
+	// register prometheus
+	grpc_prometheus.Register(s.Server)
+	// Register Prometheus metrics handler.
+	http.Handle(s.Config.PrometheusPath, promhttp.Handler())
+	// enable latency histograms
+	if s.Config.PrometheusEnableLatencyHistograms {
+		grpc_prometheus.EnableHandlingTimeHistogram()
+	}
+	err := http.ListenAndServe(fmt.Sprintf(":%d", s.Config.PrometheusPort), nil)
+	errorutils.PanicOnErr(nil, "error serving prometheus metrics", err)
+}
+
+func (s *GrpcServer) run() {
+	defer wg.Done()
 	s.maybeInitSentry()
 	// create listener
 	listenOn := fmt.Sprintf("0.0.0.0:%d", s.Config.Port)
 	listener, err := net.Listen("tcp", listenOn)
 	errorutils.LogOnErr(nil, "error creating grpc listener", err)
-	if err != nil {
-		return err
-	}
 
 	opts := []grpc_recovery.Option{
 		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
@@ -76,38 +120,16 @@ func (s *GrpcServer) Run() error {
 	healthService := NewHealthChecker()
 	grpc_health_v1.RegisterHealthServer(server, healthService)
 
-	if s.BeforeStart != nil {
-		beforeStartErr := s.BeforeStart()
-		errorutils.LogOnErr(nil, "error running BeforeStart function", beforeStartErr)
-		return beforeStartErr
-	}
-
 	if s.Config.PrometheusEnabled {
 		go s.servePrometheusMetrics()
 	}
 
 	// serve
-	logging.Log.WithField("listening_on", listenOn).Info("gRPC server started")
-	err = server.Serve(listener)
-	errorutils.LogOnErr(nil, "error serving gRPC server", err)
-	return err
-}
+	go func() {
+		logging.Log.WithField("listening_on", listenOn).Info("gRPC server started")
+		runError <- server.Serve(listener)
+	}()
 
-func (s *GrpcServer) maybeInitSentry() {
-	if s.Config.SentryEnabled {
-		sentryutils.MaybeInitSentry(s.Config.SentryClientOptions, nil)
-	}
-}
-
-func (s *GrpcServer) servePrometheusMetrics() {
-	// register prometheus
-	grpc_prometheus.Register(s.Server)
-	// Register Prometheus metrics handler.
-	http.Handle(s.Config.PrometheusPath, promhttp.Handler())
-	// enable latency histograms
-	if s.Config.PrometheusEnableLatencyHistograms {
-		grpc_prometheus.EnableHandlingTimeHistogram()
-	}
-	err := http.ListenAndServe(fmt.Sprintf(":%d", s.Config.PrometheusPort), nil)
-	errorutils.PanicOnErr(nil, "error serving prometheus metrics", err)
+	<-shutDown
+	server.Stop()
 }
