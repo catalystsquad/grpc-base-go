@@ -42,9 +42,38 @@ type GrpcServerConfig struct {
 }
 
 func NewGrpcServer(config GrpcServerConfig) *GrpcServer {
-	return &GrpcServer{
+	grpcServer := &GrpcServer{
 		Config: config,
 	}
+	grpcServer.initialize()
+	return grpcServer
+}
+
+func (s *GrpcServer) initialize() {
+	opts := []grpc_recovery.Option{
+		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
+			recoveredErr := errorutils.RecoverErr(p)
+			err = s.Config.GetErrorToReturn(recoveredErr)
+			if s.Config.CaptureRecoveredErr(err) {
+				errorutils.LogOnErr(nil, s.Config.CaptureErrormessage, err)
+			}
+			return
+		}),
+	}
+	// create grpc server
+	server := grpc.NewServer(
+		grpc.UnaryInterceptor(
+			grpc_middleware.ChainUnaryServer(
+				grpc_prometheus.UnaryServerInterceptor,
+				grpc_recovery.UnaryServerInterceptor(opts...),
+			),
+		),
+	)
+
+	// register health service (used in k8s health checks)
+	healthService := NewHealthChecker()
+	grpc_health_v1.RegisterHealthServer(server, healthService)
+	s.Server = server
 }
 
 func (s *GrpcServer) Run() (err error) {
@@ -96,30 +125,6 @@ func (s *GrpcServer) run() {
 	listener, err := net.Listen("tcp", listenOn)
 	errorutils.LogOnErr(nil, "error creating grpc listener", err)
 
-	opts := []grpc_recovery.Option{
-		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
-			recoveredErr := errorutils.RecoverErr(p)
-			err = s.Config.GetErrorToReturn(recoveredErr)
-			if s.Config.CaptureRecoveredErr(err) {
-				errorutils.LogOnErr(nil, s.Config.CaptureErrormessage, err)
-			}
-			return
-		}),
-	}
-	// create grpc server
-	server := grpc.NewServer(
-		grpc.UnaryInterceptor(
-			grpc_middleware.ChainUnaryServer(
-				grpc_prometheus.UnaryServerInterceptor,
-				grpc_recovery.UnaryServerInterceptor(opts...),
-			),
-		),
-	)
-
-	// register health service (used in k8s health checks)
-	healthService := NewHealthChecker()
-	grpc_health_v1.RegisterHealthServer(server, healthService)
-
 	if s.Config.PrometheusEnabled {
 		go s.servePrometheusMetrics()
 	}
@@ -127,9 +132,9 @@ func (s *GrpcServer) run() {
 	// serve
 	go func() {
 		logging.Log.WithField("listening_on", listenOn).Info("gRPC server started")
-		runError <- server.Serve(listener)
+		runError <- s.Server.Serve(listener)
 	}()
 
 	<-shutDown
-	server.Stop()
+	s.Server.Stop()
 }
