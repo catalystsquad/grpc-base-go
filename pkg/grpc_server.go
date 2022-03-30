@@ -1,6 +1,8 @@
 package pkg
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"github.com/catalystsquad/app-utils-go/errorutils"
 	"github.com/catalystsquad/app-utils-go/logging"
@@ -11,7 +13,9 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -29,28 +33,32 @@ type GrpcServer struct {
 }
 
 type GrpcServerConfig struct {
-	Port                              int
-	SentryEnabled                     bool
-	SentryClientOptions               sentry.ClientOptions
-	PrometheusEnabled                 bool
-	PrometheusPath                    string
-	PrometheusPort                    int
-	PrometheusEnableLatencyHistograms bool
-	GetErrorToReturn                  func(err error) error
-	CaptureRecoveredErr               func(err error) bool
-	CaptureErrormessage               string
+	Port                               int                   // port to run on
+	SentryEnabled                      bool                  // enable sentry integration
+	SentryClientOptions                sentry.ClientOptions  // arbitrary sentry client options to pass through to sentry client
+	PrometheusEnabled                  bool                  // enable prometheus metrics
+	PrometheusPath                     string                // path to enable prometheus metrics on
+	PrometheusPort                     int                   // port to run prometheus metrics on
+	PrometheusEnableLatencyHistograms  bool                  // enable prometheus latency histograms
+	GetErrorToReturn                   func(err error) error // called when recovering from a panic, gets the error to return to the caller
+	CaptureRecoveredErr                func(err error) bool  // called when recovering from a panic, return true to capture the error in sentry
+	CaptureErrormessage                string                // error message logged when recovering from a panic
+	Opts                               []grpc.ServerOption   // arbitrary options to pass through to the server
+	TlsCertPath, TlsKeyPath, TlsCaPath string                // file paths to tls cert, key, and ca, if all 3 are provided then the server runs with tls enabled
 }
 
-func NewGrpcServer(config GrpcServerConfig) *GrpcServer {
+// NewGrpcServer instantiates and initializes a new grpc server. It does not run the server.
+func NewGrpcServer(config GrpcServerConfig) (*GrpcServer, error) {
 	grpcServer := &GrpcServer{
 		Config: config,
 	}
-	grpcServer.initialize()
-	return grpcServer
+	err := grpcServer.initialize()
+	return grpcServer, err
 }
 
-func (s *GrpcServer) initialize() {
-	opts := []grpc_recovery.Option{
+// initialize() initializes the server with the config
+func (s *GrpcServer) initialize() error {
+	recoverOpts := []grpc_recovery.Option{
 		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
 			recoveredErr := errorutils.RecoverErr(p)
 			err = s.Config.GetErrorToReturn(recoveredErr)
@@ -60,22 +68,28 @@ func (s *GrpcServer) initialize() {
 			return
 		}),
 	}
-	// create grpc server
-	server := grpc.NewServer(
-		grpc.UnaryInterceptor(
-			grpc_middleware.ChainUnaryServer(
-				grpc_prometheus.UnaryServerInterceptor,
-				grpc_recovery.UnaryServerInterceptor(opts...),
-			),
+	interceptorOpt := grpc.UnaryInterceptor(
+		grpc_middleware.ChainUnaryServer(
+			grpc_prometheus.UnaryServerInterceptor,
+			grpc_recovery.UnaryServerInterceptor(recoverOpts...),
 		),
 	)
+	s.Config.Opts = append(s.Config.Opts, interceptorOpt)
+	err := s.maybeLoadTLSCredentials()
+	if err != nil {
+		return err
+	}
+	// create grpc server with options
+	server := grpc.NewServer(s.Config.Opts...)
 
 	// register health service (used in k8s health checks)
 	healthService := NewHealthChecker()
 	grpc_health_v1.RegisterHealthServer(server, healthService)
 	s.Server = server
+	return nil
 }
 
+// Run runs the grpc server, call this after creating a server with NewGrpcServer()
 func (s *GrpcServer) Run() (err error) {
 	// listen for os signals
 	var osSignal = make(chan os.Signal, 1)
@@ -98,12 +112,14 @@ func (s *GrpcServer) Run() (err error) {
 	return
 }
 
+// maybeInitSentry initializes a sentry client if configured to do so
 func (s *GrpcServer) maybeInitSentry() {
 	if s.Config.SentryEnabled {
 		sentryutils.MaybeInitSentry(s.Config.SentryClientOptions, nil)
 	}
 }
 
+// servePrometheusMetrics serves prometheus metrics
 func (s *GrpcServer) servePrometheusMetrics() {
 	// register prometheus
 	grpc_prometheus.Register(s.Server)
@@ -117,6 +133,7 @@ func (s *GrpcServer) servePrometheusMetrics() {
 	errorutils.PanicOnErr(nil, "error serving prometheus metrics", err)
 }
 
+//run is the internal run implementation
 func (s *GrpcServer) run() {
 	defer wg.Done()
 	s.maybeInitSentry()
@@ -137,4 +154,34 @@ func (s *GrpcServer) run() {
 
 	<-shutDown
 	s.Server.Stop()
+}
+
+// MaybeLoadTLSCredentials loads TLS transport credentials into the server options if the tls cert path, key path, and
+// ca path are specified.
+func (s *GrpcServer) maybeLoadTLSCredentials() error {
+	if s.Config.TlsCertPath != "" && s.Config.TlsKeyPath != "" && s.Config.TlsCaPath != "" {
+		srv, err := tls.LoadX509KeyPair(s.Config.TlsCertPath, s.Config.TlsKeyPath)
+		if err != nil {
+			return err
+		}
+
+		p := x509.NewCertPool()
+
+		if s.Config.TlsCaPath != "" {
+			ca, err := ioutil.ReadFile(s.Config.TlsCaPath)
+			if err != nil {
+				return err
+			}
+
+			p.AppendCertsFromPEM(ca)
+		}
+		creds := grpc.Creds(credentials.NewTLS(&tls.Config{
+			MinVersion:   tls.VersionTLS13,
+			Certificates: []tls.Certificate{srv},
+			RootCAs:      p,
+		}))
+
+		s.Config.Opts = append(s.Config.Opts, creds)
+	}
+	return nil
 }
