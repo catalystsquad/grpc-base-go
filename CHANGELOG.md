@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.0...v1.0.1) (2022-03-30)
+
+
+### Bug Fixes
+
+* Added support for arbitrary grpc options pass through. Added configurations for TLS, when all are set, the server runs with TLS enabled. ([#3](https://github.com/catalystsquad/grpc-base-go/issues/3)) ([e960d25](https://github.com/catalystsquad/grpc-base-go/commit/e960d252f56968448aeb0478b97f6ed07e2858c7))
+
 # 1.0.0 (2022-03-21)
 
 
