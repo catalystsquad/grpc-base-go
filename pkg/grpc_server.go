@@ -3,7 +3,6 @@ package pkg
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"github.com/catalystsquad/app-utils-go/errorutils"
 	"github.com/catalystsquad/app-utils-go/logging"
@@ -83,9 +82,6 @@ func (s *GrpcServer) initialize() error {
 		return err
 	}
 	// create grpc server with options
-	// marshall for readability in logs
-	optsBytes, _ := json.Marshal(s.Config.Opts)
-	logging.Log.WithFields(logrus.Fields{"options": string(optsBytes)}).Info("initialized grpc server")
 	server := grpc.NewServer(s.Config.Opts...)
 
 	// register health service (used in k8s health checks)
