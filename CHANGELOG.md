@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.1...v1.0.2) (2022-03-31)
+
+
+### Bug Fixes
+
+* Added support for configuring minimum required tls version. Adde… ([#4](https://github.com/catalystsquad/grpc-base-go/issues/4)) ([805f5f7](https://github.com/catalystsquad/grpc-base-go/commit/805f5f7e45989e28dd937dfee15c9b4f8cfb402a))
+
 ## [1.0.1](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.0...v1.0.1) (2022-03-30)
 
 
