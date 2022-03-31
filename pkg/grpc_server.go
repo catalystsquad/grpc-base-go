@@ -12,6 +12,7 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -45,6 +46,7 @@ type GrpcServerConfig struct {
 	CaptureErrormessage                string                // error message logged when recovering from a panic
 	Opts                               []grpc.ServerOption   // arbitrary options to pass through to the server
 	TlsCertPath, TlsKeyPath, TlsCaPath string                // file paths to tls cert, key, and ca, if all 3 are provided then the server runs with tls enabled
+	MinTlsVersion                      uint16                // minimum tls version to use, defaults to 1.0
 }
 
 // NewGrpcServer instantiates and initializes a new grpc server. It does not run the server.
@@ -80,6 +82,7 @@ func (s *GrpcServer) initialize() error {
 		return err
 	}
 	// create grpc server with options
+	logging.Log.WithFields(logrus.Fields{"options": s.Config.Opts}).Info("initialized grpc server")
 	server := grpc.NewServer(s.Config.Opts...)
 
 	// register health service (used in k8s health checks)
@@ -160,6 +163,15 @@ func (s *GrpcServer) run() {
 // ca path are specified.
 func (s *GrpcServer) maybeLoadTLSCredentials() error {
 	if s.Config.TlsCertPath != "" && s.Config.TlsKeyPath != "" && s.Config.TlsCaPath != "" {
+		if s.Config.MinTlsVersion == 0 {
+			s.Config.MinTlsVersion = tls.VersionTLS10
+		}
+		logging.Log.WithFields(logrus.Fields{
+			"min_tls_version": s.Config.MinTlsVersion,
+			"cert_path":       s.Config.TlsCertPath,
+			"key_path":        s.Config.TlsKeyPath,
+			"ca_path":         s.Config.TlsCaPath,
+		}).Info("running with tls enabled")
 		srv, err := tls.LoadX509KeyPair(s.Config.TlsCertPath, s.Config.TlsKeyPath)
 		if err != nil {
 			return err
@@ -176,7 +188,7 @@ func (s *GrpcServer) maybeLoadTLSCredentials() error {
 			p.AppendCertsFromPEM(ca)
 		}
 		creds := grpc.Creds(credentials.NewTLS(&tls.Config{
-			MinVersion:   tls.VersionTLS13,
+			MinVersion:   s.Config.MinTlsVersion,
 			Certificates: []tls.Certificate{srv},
 			RootCAs:      p,
 		}))
