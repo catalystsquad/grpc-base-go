@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.2...v1.0.3) (2022-04-17)
+
+
+### Bug Fixes
+
+* Add gzip compression support ([#5](https://github.com/catalystsquad/grpc-base-go/issues/5)) ([c858baf](https://github.com/catalystsquad/grpc-base-go/commit/c858baf16f5d9c172d1ea48111497b496a4aae58))
+
 ## [1.0.2](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.1...v1.0.2) (2022-03-31)
 
 
