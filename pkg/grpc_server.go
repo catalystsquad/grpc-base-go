@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	_ "google.golang.org/grpc/encoding/gzip" // import for side effects, enables clients to use gzip compression
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"io/ioutil"
 	"net"
