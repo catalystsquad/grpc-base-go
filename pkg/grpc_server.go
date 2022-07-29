@@ -9,6 +9,7 @@ import (
 	sentryutils "github.com/catalystsquad/app-utils-go/sentry"
 	"github.com/getsentry/sentry-go"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -48,6 +49,9 @@ type GrpcServerConfig struct {
 	Opts                               []grpc.ServerOption   // arbitrary options to pass through to the server
 	TlsCertPath, TlsKeyPath, TlsCaPath string                // file paths to tls cert, key, and ca, if all 3 are provided then the server runs with tls enabled
 	MinTlsVersion                      uint16                // minimum tls version to use, defaults to 1.0
+	UnaryServerInterceptors            []grpc.UnaryServerInterceptor
+	StreamServerInterceptors           []grpc.StreamServerInterceptor
+	AuthFunc                           grpc_auth.AuthFunc
 }
 
 // NewGrpcServer instantiates and initializes a new grpc server. It does not run the server.
@@ -61,23 +65,19 @@ func NewGrpcServer(config GrpcServerConfig) (*GrpcServer, error) {
 
 // initialize() initializes the server with the config
 func (s *GrpcServer) initialize() error {
-	recoverOpts := []grpc_recovery.Option{
-		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
-			recoveredErr := errorutils.RecoverErr(p)
-			err = s.Config.GetErrorToReturn(recoveredErr)
-			if s.Config.CaptureRecoveredErr(err) {
-				errorutils.LogOnErr(nil, s.Config.CaptureErrormessage, err)
-			}
-			return
-		}),
-	}
-	interceptorOpt := grpc.UnaryInterceptor(
+	unaryInterceptorChain := s.getUnaryInterceptorChain()
+	unaryInterceptorOpt := grpc.UnaryInterceptor(
 		grpc_middleware.ChainUnaryServer(
-			grpc_prometheus.UnaryServerInterceptor,
-			grpc_recovery.UnaryServerInterceptor(recoverOpts...),
+			unaryInterceptorChain,
 		),
 	)
-	s.Config.Opts = append(s.Config.Opts, interceptorOpt)
+	streamInterceptorChain := s.getStreamInterceptorChain()
+	streamInterceptorOpt := grpc.StreamInterceptor(
+		grpc_middleware.ChainStreamServer(
+			streamInterceptorChain,
+		),
+	)
+	s.Config.Opts = append(s.Config.Opts, unaryInterceptorOpt, streamInterceptorOpt)
 	err := s.maybeLoadTLSCredentials()
 	if err != nil {
 		return err
@@ -196,4 +196,70 @@ func (s *GrpcServer) maybeLoadTLSCredentials() error {
 		s.Config.Opts = append(s.Config.Opts, creds)
 	}
 	return nil
+}
+
+func (s *GrpcServer) getUnaryInterceptorChain() grpc.UnaryServerInterceptor {
+	recoverOpts := []grpc_recovery.Option{
+		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
+			recoveredErr := errorutils.RecoverErr(p)
+			err = s.Config.GetErrorToReturn(recoveredErr)
+			if s.Config.CaptureRecoveredErr(err) {
+				errorutils.LogOnErr(nil, s.Config.CaptureErrormessage, err)
+			}
+			return
+		}),
+	}
+	// add default interceptors
+	interceptorChain := grpc_middleware.ChainUnaryServer(
+		grpc_prometheus.UnaryServerInterceptor,
+		grpc_recovery.UnaryServerInterceptor(recoverOpts...),
+	)
+	// add auth interceptor if we need to
+	if s.Config.AuthFunc != nil {
+		interceptorChain = grpc_middleware.ChainUnaryServer(
+			interceptorChain,
+			grpc_auth.UnaryServerInterceptor(s.Config.AuthFunc),
+		)
+	}
+	// add any additional interceptors
+	for _, interceptor := range s.Config.UnaryServerInterceptors {
+		interceptorChain = grpc_middleware.ChainUnaryServer(
+			interceptorChain,
+			interceptor,
+		)
+	}
+	return interceptorChain
+}
+
+func (s *GrpcServer) getStreamInterceptorChain() grpc.StreamServerInterceptor {
+	recoverOpts := []grpc_recovery.Option{
+		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
+			recoveredErr := errorutils.RecoverErr(p)
+			err = s.Config.GetErrorToReturn(recoveredErr)
+			if s.Config.CaptureRecoveredErr(err) {
+				errorutils.LogOnErr(nil, s.Config.CaptureErrormessage, err)
+			}
+			return
+		}),
+	}
+	// add default interceptors
+	interceptorChain := grpc_middleware.ChainStreamServer(
+		grpc_prometheus.StreamServerInterceptor,
+		grpc_recovery.StreamServerInterceptor(recoverOpts...),
+	)
+	// add auth interceptor if we need to
+	if s.Config.AuthFunc != nil {
+		interceptorChain = grpc_middleware.ChainStreamServer(
+			interceptorChain,
+			grpc_auth.StreamServerInterceptor(s.Config.AuthFunc),
+		)
+	}
+	// add any additional interceptors
+	for _, interceptor := range s.Config.StreamServerInterceptors {
+		interceptorChain = grpc_middleware.ChainStreamServer(
+			interceptorChain,
+			interceptor,
+		)
+	}
+	return interceptorChain
 }
