@@ -15,9 +15,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	_ "google.golang.org/grpc/encoding/gzip" // import for side effects, enables clients to use gzip compression
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -57,9 +59,9 @@ type GrpcServerConfig struct {
 // NewGrpcServer instantiates and initializes a new grpc server. It does not run the server.
 func NewGrpcServer(config GrpcServerConfig) (*GrpcServer, error) {
 	if config.GetErrorToReturn == nil {
-		// by default, return the error without modification
+		// by default, return an internal server error
 		config.GetErrorToReturn = func(err error) error {
-			return err
+			return status.Error(codes.Internal, "unexpected error handling request")
 		}
 	}
 	if config.CaptureRecoveredErr == nil {
