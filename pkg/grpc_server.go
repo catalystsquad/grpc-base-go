@@ -79,19 +79,8 @@ func NewGrpcServer(config GrpcServerConfig) (*GrpcServer, error) {
 
 // initialize() initializes the server with the config
 func (s *GrpcServer) initialize() error {
-	unaryInterceptorChain := s.getUnaryInterceptorChain()
-	unaryInterceptorOpt := grpc.UnaryInterceptor(
-		grpc_middleware.ChainUnaryServer(
-			unaryInterceptorChain,
-		),
-	)
-	streamInterceptorChain := s.getStreamInterceptorChain()
-	streamInterceptorOpt := grpc.StreamInterceptor(
-		grpc_middleware.ChainStreamServer(
-			streamInterceptorChain,
-		),
-	)
-	s.Config.Opts = append(s.Config.Opts, unaryInterceptorOpt, streamInterceptorOpt)
+	s.setUnaryInterceptorChain()
+	s.setStreamInterceptorChain()
 	err := s.maybeLoadTLSCredentials()
 	if err != nil {
 		return err
@@ -212,7 +201,7 @@ func (s *GrpcServer) maybeLoadTLSCredentials() error {
 	return nil
 }
 
-func (s *GrpcServer) getUnaryInterceptorChain() grpc.UnaryServerInterceptor {
+func (s *GrpcServer) setUnaryInterceptorChain() {
 	recoverOpts := []grpc_recovery.Option{
 		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
 			recoveredErr := errorutils.RecoverErr(p)
@@ -242,10 +231,15 @@ func (s *GrpcServer) getUnaryInterceptorChain() grpc.UnaryServerInterceptor {
 			interceptor,
 		)
 	}
-	return interceptorChain
+	unaryInterceptorOpt := grpc.UnaryInterceptor(
+		grpc_middleware.ChainUnaryServer(
+			interceptorChain,
+		),
+	)
+	s.Config.Opts = append(s.Config.Opts, unaryInterceptorOpt)
 }
 
-func (s *GrpcServer) getStreamInterceptorChain() grpc.StreamServerInterceptor {
+func (s *GrpcServer) setStreamInterceptorChain() {
 	recoverOpts := []grpc_recovery.Option{
 		grpc_recovery.WithRecoveryHandler(func(p interface{}) (err error) {
 			recoveredErr := errorutils.RecoverErr(p)
@@ -275,5 +269,10 @@ func (s *GrpcServer) getStreamInterceptorChain() grpc.StreamServerInterceptor {
 			interceptor,
 		)
 	}
-	return interceptorChain
+	streamInterceptorOpt := grpc.StreamInterceptor(
+		grpc_middleware.ChainStreamServer(
+			interceptorChain,
+		),
+	)
+	s.Config.Opts = append(s.Config.Opts, streamInterceptorOpt)
 }
