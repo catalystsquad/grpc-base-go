@@ -56,6 +56,18 @@ type GrpcServerConfig struct {
 
 // NewGrpcServer instantiates and initializes a new grpc server. It does not run the server.
 func NewGrpcServer(config GrpcServerConfig) (*GrpcServer, error) {
+	if config.GetErrorToReturn == nil {
+		// by default, return the error without modification
+		config.GetErrorToReturn = func(err error) error {
+			return err
+		}
+	}
+	if config.CaptureRecoveredErr == nil {
+		// by default return sentry enabled, which will capture either all or none depending on sentry settings
+		config.CaptureRecoveredErr = func(err error) bool {
+			return config.SentryEnabled
+		}
+	}
 	grpcServer := &GrpcServer{
 		Config: config,
 	}
