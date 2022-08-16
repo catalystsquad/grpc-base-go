@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.3...v1.0.4) (2022-08-16)
+
+
+### Bug Fixes
+
+* Add easy support for an auth interceptor, as well as supporting arbitrary unary and stream interceptors ([#6](https://github.com/catalystsquad/grpc-base-go/issues/6)) ([b8aa589](https://github.com/catalystsquad/grpc-base-go/commit/b8aa58965e49f475858842e9f4ea9116b478329b))
+
 ## [1.0.3](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.2...v1.0.3) (2022-04-17)
 
 
