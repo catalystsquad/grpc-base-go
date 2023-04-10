@@ -54,6 +54,7 @@ type GrpcServerConfig struct {
 	UnaryServerInterceptors            []grpc.UnaryServerInterceptor
 	StreamServerInterceptors           []grpc.StreamServerInterceptor
 	AuthFunc                           grpc_auth.AuthFunc
+	HealthServer                       grpc_health_v1.HealthServer
 }
 
 // NewGrpcServer instantiates and initializes a new grpc server. It does not run the server.
@@ -89,8 +90,11 @@ func (s *GrpcServer) initialize() error {
 	server := grpc.NewServer(s.Config.Opts...)
 
 	// register health service (used in k8s health checks)
-	healthService := NewHealthChecker()
-	grpc_health_v1.RegisterHealthServer(server, healthService)
+	if s.Config.HealthServer == nil {
+		// if no health server is configured, initialize the default health server
+		s.Config.HealthServer = NewHealthChecker()
+	}
+	grpc_health_v1.RegisterHealthServer(server, s.Config.HealthServer)
 	s.Server = server
 	return nil
 }
