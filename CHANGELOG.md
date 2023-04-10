@@ -1,3 +1,10 @@
+## [1.0.5](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.4...v1.0.5) (2023-04-10)
+
+
+### Bug Fixes
+
+* Allow custom health server as part of configuration ([#10](https://github.com/catalystsquad/grpc-base-go/issues/10)) ([4e379e2](https://github.com/catalystsquad/grpc-base-go/commit/4e379e2686b8251530bad38c98724b40c1c010f4))
+
 ## [1.0.4](https://github.com/catalystsquad/grpc-base-go/compare/v1.0.3...v1.0.4) (2022-08-16)
 
 
